@@ -6,6 +6,7 @@ import sqlite3
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from fulfill import links as fulfill_links
 
@@ -21,8 +22,13 @@ PAGES = {
     "/log.html": ROOT / "static" / "log.html",
 }
 
-def init():
+def connect():
     cx = sqlite3.connect(DB)
+    cx.row_factory = sqlite3.Row
+    return cx
+
+def init():
+    cx = connect()
     cx.executescript(
         """
         CREATE TABLE IF NOT EXISTS quotes (
@@ -30,7 +36,14 @@ def init():
           created_at TEXT DEFAULT (datetime('now')),
           name TEXT, phone TEXT, email TEXT,
           address TEXT, work TEXT, notes TEXT,
-          photo TEXT, status TEXT DEFAULT 'new'
+          photo TEXT, status TEXT DEFAULT 'new',
+          fulfilled_by TEXT
+        );
+        CREATE TABLE IF NOT EXISTS clicks (
+          id INTEGER PRIMARY KEY,
+          quote_id INTEGER,
+          dest TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS events (
           id INTEGER PRIMARY KEY,
@@ -49,6 +62,9 @@ def init():
         );
         """
     )
+    cols = [r[1] for r in cx.execute("PRAGMA table_info(quotes)")]
+    if "fulfilled_by" not in cols:
+        cx.execute("ALTER TABLE quotes ADD COLUMN fulfilled_by TEXT")
     cx.commit()
     cx.close()
 
@@ -69,7 +85,7 @@ def save_quote(form):
         "notes": form.getvalue("notes", "") or "",
         "photo": photo_path,
     }
-    cx = sqlite3.connect(DB)
+    cx = connect()
     cur = cx.execute(
         "INSERT INTO quotes(name,phone,email,address,work,notes,photo) VALUES (?,?,?,?,?,?,?)",
         (fields["name"], fields["phone"], fields["email"],
@@ -89,6 +105,28 @@ def save_quote(form):
     cx.close()
     return qid, pid, fields
 
+def log_click(qid, dest):
+    dest = (dest or "")[:32]
+    if dest not in ("taskrabbit", "fiverr", "direct"):
+        return None
+    cx = connect()
+    work = ""
+    if qid:
+        row = cx.execute("SELECT work FROM quotes WHERE id=?", (qid,)).fetchone()
+        work = row["work"] if row else ""
+        cx.execute("INSERT INTO clicks(quote_id, dest) VALUES (?,?)", (qid, dest))
+        prev = cx.execute("SELECT fulfilled_by FROM quotes WHERE id=?", (qid,)).fetchone()
+        old = (prev["fulfilled_by"] if prev and prev["fulfilled_by"] else "")
+        parts = [p for p in old.split(",") if p]
+        if dest not in parts:
+            parts.append(dest)
+        cx.execute("UPDATE quotes SET fulfilled_by=? WHERE id=?", (",".join(parts), qid))
+    urls = fulfill_links(work)
+    target = urls["tr_url"] if dest == "taskrabbit" else urls["fv_url"]
+    cx.commit()
+    cx.close()
+    return target
+
 class H(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="text/plain"):
         if isinstance(body, str):
@@ -99,22 +137,41 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        except BrokenPipeError:
+        except (BrokenPipeError, ConnectionResetError):
             pass
-        except ConnectionResetError:
+
+    def _redirect(self, url):
+        try:
+            self.send_response(302)
+            self.send_header("Location", url)
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError):
             pass
 
     def do_GET(self):
-        path = self.path.split("?", 1)[0]
+        u = urlparse(self.path)
+        path = u.path
+        qs = parse_qs(u.query)
         print("GET", path)
+        if path == "/out":
+            qid = (qs.get("qid") or [""])[0]
+            dest = (qs.get("to") or [""])[0]
+            try:
+                qid = int(qid)
+            except ValueError:
+                qid = 0
+            url = log_click(qid, dest) or "/"
+            return self._redirect(url)
         if path == "/quotes":
-            cx = sqlite3.connect(DB)
-            cx.row_factory = sqlite3.Row
+            cx = connect()
             rows = [dict(r) for r in cx.execute(
-                "SELECT id,created_at,name,phone,address,work,status FROM quotes ORDER BY id DESC"
+                "SELECT id,created_at,name,phone,address,work,status,fulfilled_by FROM quotes ORDER BY id DESC"
+            )]
+            clicks = [dict(r) for r in cx.execute(
+                "SELECT quote_id, dest, created_at FROM clicks ORDER BY id DESC LIMIT 50"
             )]
             cx.close()
-            return self._send(200, json.dumps(rows, indent=2), "application/json")
+            return self._send(200, json.dumps({"quotes": rows, "clicks": clicks}, indent=2), "application/json")
         page = PAGES.get(path)
         if not page or not page.exists():
             return self._send(404, "not found\n")
