@@ -7,10 +7,13 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from fulfill import links as fulfill_links
+
 ROOT = Path(__file__).resolve().parent
 PHOTOS = ROOT / "photos"
 PHOTOS.mkdir(exist_ok=True)
 DB = ROOT / "projects.db"
+THANKS = (ROOT / "static" / "thanks.html").read_text()
 PAGES = {
     "/": ROOT / "static" / "quote.html",
     "/quote": ROOT / "static" / "quote.html",
@@ -84,7 +87,7 @@ def save_quote(form):
     )
     cx.commit()
     cx.close()
-    return qid, pid
+    return qid, pid, fields
 
 class H(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="text/plain"):
@@ -128,8 +131,15 @@ class H(BaseHTTPRequestHandler):
             "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
         }
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env)
-        qid, pid = save_quote(form)
-        return self._send(200, "saved quote %s as project %s\n" % (qid, pid))
+        qid, pid, fields = save_quote(form)
+        urls = fulfill_links(fields.get("work"))
+        html = THANKS.format(
+            qid=qid, pid=pid,
+            work=fields.get("work") or "",
+            address=fields.get("address") or "",
+            **urls,
+        )
+        return self._send(200, html, "text/html; charset=utf-8")
 
     def log_message(self, fmt, *args):
         print(fmt % args)
