@@ -1,6 +1,6 @@
 # xtra-hands-ledger
 
-Smallest test only. SQLite project ledger. Camera log is optional.
+SQLite job ledger for Xtra Hands. Camera log and bid ingest are optional extras.
 
 ## Already cloned?
 
@@ -29,5 +29,18 @@ python3 cam_server.py
 
 Safari: `http://127.0.0.1:8000/`
 
-Photo + notes land in `photos/` and `events` (`kind=job_log`).
-Keep iSH open or the server dies.
+## Bid watcher
+
+The scraper lives in `Peekabot/xtra-hands-bid-triage`. This repo only records new bids.
+
+```bash
+# optional: produce JSON
+cd /root/xtra-hands-bid-triage && python3 scripts/bid_triage.py
+
+# ingest into ledger (uses sample if no JSON)
+cd /root/xtra-hands-ledger
+git pull
+python3 watch_bids.py
+python3 watch_bids.py   # second run should print: no new bids
+sqlite3 projects.db 'SELECT id,name,status FROM projects; SELECT url,decision,project_id FROM bids;'
+```
