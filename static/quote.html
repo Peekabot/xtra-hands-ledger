@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xtra Hands — free digital quote</title>
+<style>
+  body { font: 16px/1.4 system-ui, sans-serif; max-width: 28rem; margin: 1.5rem auto; padding: 0 1rem; }
+  label { display: block; margin: .8rem 0 .2rem; }
+  input, select, textarea { width: 100%; box-sizing: border-box; padding: .5rem; }
+  button { margin-top: 1rem; padding: .6rem 1rem; }
+  .fine { color: #555; font-size: .85rem; }
+</style>
+<h1>Free digital quote</h1>
+<p class="fine">Demo only. Site prep, haul, demo surplus — Capital Region NY.</p>
+<form action="/quote" method="post" enctype="multipart/form-data">
+  <label>Name <input name="name" required></label>
+  <label>Phone <input name="phone" type="tel" required></label>
+  <label>Email <input name="email" type="email"></label>
+  <label>Job address <input name="address" required></label>
+  <label>Work
+    <select name="work">
+      <option>site prep</option>
+      <option>demo + haul</option>
+      <option>surplus pickup</option>
+      <option>other</option>
+    </select>
+  </label>
+  <label>Notes <textarea name="notes" rows="4"></textarea></label>
+  <label>Photo of the site
+    <input type="file" name="photo" accept="image/*" capture="environment">
+  </label>
+  <button>Request quote</button>
+</form>
