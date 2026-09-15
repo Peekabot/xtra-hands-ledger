@@ -1,24 +1,33 @@
 # xtra-hands-ledger
 
-Smallest test only. SQLite project ledger. No Lupa, no HTTP.
+Smallest test only. SQLite project ledger. Camera log is optional.
 
-## iSH pull and run
+## Already cloned?
+
+```bash
+cd /root/xtra-hands-ledger
+git pull
+```
+
+Do not clone a second copy.
+
+## Ledger test
 
 ```bash
 apk add git sqlite python3
-cd /root
-git clone https://github.com/Peekabot/xtra-hands-ledger.git
-cd xtra-hands-ledger
+cd /root/xtra-hands-ledger
 chmod +x run_test.sh
 ./run_test.sh
 ```
 
-Expected last lines: `PERSIST OK` then `CLOSE PREDICATE OK`.
-
-Then force-quit iSH, reopen:
+## Camera job log (iSH foreground + Safari)
 
 ```bash
-sqlite3 /root/xtra-hands-ledger/projects.db 'SELECT name,status FROM projects; SELECT name,status FROM tasks;'
+cd /root/xtra-hands-ledger
+python3 cam_server.py
 ```
 
-If those rows are still there, persistence works. Stop. Do not add Lupa yet.
+Safari: `http://127.0.0.1:8000/`
+
+Photo + notes land in `photos/` and `events` (`kind=job_log`).
+Keep iSH open or the server dies.

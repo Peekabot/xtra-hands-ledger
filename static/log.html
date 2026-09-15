@@ -1,0 +1,19 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job log</title>
+<form action="/log" method="post" enctype="multipart/form-data">
+  <p>Project id <input name="project_id" value="1"></p>
+  <p>Task
+    <select name="task">
+      <option>site-walk</option>
+      <option>bid</option>
+      <option>haul</option>
+      <option>surplus log</option>
+    </select>
+  </p>
+  <p>Notes<br><textarea name="notes" rows="4"></textarea></p>
+  <p>Photo
+    <input type="file" name="photo" accept="image/*" capture="environment">
+  </p>
+  <button>Save</button>
+</form>
