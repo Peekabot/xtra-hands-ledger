@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local demo signup. Not public-facing. Keep iSH in the foreground."""
+"""Local demo signup. Keep iSH in the foreground."""
 import cgi
 import json
 import sqlite3
@@ -13,6 +13,7 @@ PHOTOS.mkdir(exist_ok=True)
 DB = ROOT / "projects.db"
 PAGES = {
     "/": ROOT / "static" / "quote.html",
+    "/quote": ROOT / "static" / "quote.html",
     "/quote.html": ROOT / "static" / "quote.html",
     "/log.html": ROOT / "static" / "log.html",
 }
@@ -24,20 +25,13 @@ def init():
         CREATE TABLE IF NOT EXISTS quotes (
           id INTEGER PRIMARY KEY,
           created_at TEXT DEFAULT (datetime('now')),
-          name TEXT,
-          phone TEXT,
-          email TEXT,
-          address TEXT,
-          work TEXT,
-          notes TEXT,
-          photo TEXT,
-          status TEXT DEFAULT 'new'
+          name TEXT, phone TEXT, email TEXT,
+          address TEXT, work TEXT, notes TEXT,
+          photo TEXT, status TEXT DEFAULT 'new'
         );
         CREATE TABLE IF NOT EXISTS events (
           id INTEGER PRIMARY KEY,
-          kind TEXT,
-          project_id INTEGER,
-          payload TEXT
+          kind TEXT, project_id INTEGER, payload TEXT
         );
         CREATE TABLE IF NOT EXISTS projects (
           id INTEGER PRIMARY KEY,
@@ -64,12 +58,12 @@ def save_quote(form):
             dest.write_bytes(photo.file.read())
             photo_path = str(dest)
     fields = {
-        "name": form.getvalue("name", ""),
-        "phone": form.getvalue("phone", ""),
-        "email": form.getvalue("email", ""),
-        "address": form.getvalue("address", ""),
-        "work": form.getvalue("work", ""),
-        "notes": form.getvalue("notes", ""),
+        "name": form.getvalue("name", "") or "",
+        "phone": form.getvalue("phone", "") or "",
+        "email": form.getvalue("email", "") or "",
+        "address": form.getvalue("address", "") or "",
+        "work": form.getvalue("work", "") or "",
+        "notes": form.getvalue("notes", "") or "",
         "photo": photo_path,
     }
     cx = sqlite3.connect(DB)
@@ -93,45 +87,49 @@ def save_quote(form):
     return qid, pid
 
 class H(BaseHTTPRequestHandler):
+    def _send(self, code, body, ctype="text/plain"):
+        if isinstance(body, str):
+            body = body.encode()
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except BrokenPipeError:
+            pass
+        except ConnectionResetError:
+            pass
+
     def do_GET(self):
-        if self.path == "/quotes":
+        path = self.path.split("?", 1)[0]
+        print("GET", path)
+        if path == "/quotes":
             cx = sqlite3.connect(DB)
             cx.row_factory = sqlite3.Row
             rows = [dict(r) for r in cx.execute(
                 "SELECT id,created_at,name,phone,address,work,status FROM quotes ORDER BY id DESC"
             )]
-            body = json.dumps(rows, indent=2).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        path = PAGES.get(self.path)
-        if not path or not path.exists():
-            self.send_error(404)
-            return
-        data = path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(data)
+            cx.close()
+            return self._send(200, json.dumps(rows, indent=2), "application/json")
+        page = PAGES.get(path)
+        if not page or not page.exists():
+            return self._send(404, "not found\n")
+        return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
 
     def do_POST(self):
-        if self.path != "/quote":
-            self.send_error(404)
-            return
+        path = self.path.split("?", 1)[0]
+        print("POST", path)
+        if path not in ("/", "/quote", "/quote.html", "/log"):
+            return self._send(404, "post %s not found\n" % path)
         env = {
             "REQUEST_METHOD": "POST",
-            "CONTENT_TYPE": self.headers.get("Content-Type"),
-            "CONTENT_LENGTH": self.headers.get("Content-Length"),
+            "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+            "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
         }
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env)
         qid, pid = save_quote(form)
-        body = f"saved quote {qid} as project {pid}\n".encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "text/plain")
-        self.end_headers()
-        self.wfile.write(body)
+        return self._send(200, "saved quote %s as project %s\n" % (qid, pid))
 
     def log_message(self, fmt, *args):
         print(fmt % args)
