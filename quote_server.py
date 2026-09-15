@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from fulfill import links as fulfill_links
+from stripe_pay import create_link, static_link
 
 ROOT = Path(__file__).resolve().parent
 PHOTOS = ROOT / "photos"
@@ -37,7 +38,8 @@ def init():
           name TEXT, phone TEXT, email TEXT,
           address TEXT, work TEXT, notes TEXT,
           photo TEXT, status TEXT DEFAULT 'new',
-          fulfilled_by TEXT
+          fulfilled_by TEXT,
+          amount TEXT
         );
         CREATE TABLE IF NOT EXISTS clicks (
           id INTEGER PRIMARY KEY,
@@ -65,8 +67,30 @@ def init():
     cols = [r[1] for r in cx.execute("PRAGMA table_info(quotes)")]
     if "fulfilled_by" not in cols:
         cx.execute("ALTER TABLE quotes ADD COLUMN fulfilled_by TEXT")
+    if "amount" not in cols:
+        cx.execute("ALTER TABLE quotes ADD COLUMN amount TEXT")
     cx.commit()
     cx.close()
+
+def cents_from(amount):
+    try:
+        return int(round(float(amount) * 100))
+    except (TypeError, ValueError):
+        return 0
+
+def pay_block(qid):
+    if static_link() or cents_from(_amount(qid)):
+        return (
+            '<a class="btn" href="/pay?qid=%s&to=direct">Pay my quote '
+            "(Apple Pay / card)</a>" % qid
+        )
+    return '<p class="fine">Direct pay: set STRIPE_PAYMENT_LINK or STRIPE_SECRET_KEY.</p>'
+
+def _amount(qid):
+    cx = connect()
+    row = cx.execute("SELECT amount FROM quotes WHERE id=?", (qid,)).fetchone()
+    cx.close()
+    return (row["amount"] if row else "") or ""
 
 def save_quote(form):
     photo_path = ""
@@ -84,12 +108,13 @@ def save_quote(form):
         "work": form.getvalue("work", "") or "",
         "notes": form.getvalue("notes", "") or "",
         "photo": photo_path,
+        "amount": form.getvalue("amount", "") or "",
     }
     cx = connect()
     cur = cx.execute(
-        "INSERT INTO quotes(name,phone,email,address,work,notes,photo) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO quotes(name,phone,email,address,work,notes,photo,amount) VALUES (?,?,?,?,?,?,?,?)",
         (fields["name"], fields["phone"], fields["email"],
-         fields["address"], fields["work"], fields["notes"], fields["photo"]),
+         fields["address"], fields["work"], fields["notes"], fields["photo"], fields["amount"]),
     )
     qid = cur.lastrowid
     title = f"Quote {qid} — {fields['address'] or fields['name']}"
@@ -111,9 +136,12 @@ def log_click(qid, dest):
         return None
     cx = connect()
     work = ""
+    amount = ""
     if qid:
-        row = cx.execute("SELECT work FROM quotes WHERE id=?", (qid,)).fetchone()
-        work = row["work"] if row else ""
+        row = cx.execute("SELECT work, amount FROM quotes WHERE id=?", (qid,)).fetchone()
+        if row:
+            work = row["work"] or ""
+            amount = row["amount"] or ""
         cx.execute("INSERT INTO clicks(quote_id, dest) VALUES (?,?)", (qid, dest))
         prev = cx.execute("SELECT fulfilled_by FROM quotes WHERE id=?", (qid,)).fetchone()
         old = (prev["fulfilled_by"] if prev and prev["fulfilled_by"] else "")
@@ -121,11 +149,12 @@ def log_click(qid, dest):
         if dest not in parts:
             parts.append(dest)
         cx.execute("UPDATE quotes SET fulfilled_by=? WHERE id=?", (",".join(parts), qid))
-    urls = fulfill_links(work)
-    target = urls["tr_url"] if dest == "taskrabbit" else urls["fv_url"]
     cx.commit()
     cx.close()
-    return target
+    if dest == "direct":
+        return create_link(cents_from(amount), qid, work)
+    urls = fulfill_links(work)
+    return urls["tr_url"] if dest == "taskrabbit" else urls["fv_url"]
 
 class H(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="text/plain"):
@@ -153,9 +182,11 @@ class H(BaseHTTPRequestHandler):
         path = u.path
         qs = parse_qs(u.query)
         print("GET", path)
-        if path == "/out":
+        if path in ("/out", "/pay"):
             qid = (qs.get("qid") or [""])[0]
-            dest = (qs.get("to") or [""])[0]
+            dest = (qs.get("to") or ["direct" if path == "/pay" else ""])[0]
+            if path == "/pay":
+                dest = "direct"
             try:
                 qid = int(qid)
             except ValueError:
@@ -165,7 +196,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/quotes":
             cx = connect()
             rows = [dict(r) for r in cx.execute(
-                "SELECT id,created_at,name,phone,address,work,status,fulfilled_by FROM quotes ORDER BY id DESC"
+                "SELECT id,created_at,name,phone,address,work,status,fulfilled_by,amount FROM quotes ORDER BY id DESC"
             )]
             clicks = [dict(r) for r in cx.execute(
                 "SELECT quote_id, dest, created_at FROM clicks ORDER BY id DESC LIMIT 50"
@@ -189,12 +220,11 @@ class H(BaseHTTPRequestHandler):
         }
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env)
         qid, pid, fields = save_quote(form)
-        urls = fulfill_links(fields.get("work"))
         html = THANKS.format(
             qid=qid, pid=pid,
             work=fields.get("work") or "",
             address=fields.get("address") or "",
-            **urls,
+            pay_block=pay_block(qid),
         )
         return self._send(200, html, "text/html; charset=utf-8")
 
@@ -204,4 +234,5 @@ class H(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     init()
     print("Safari: http://127.0.0.1:8000/")
+    print("Stripe:", "on" if static_link() else "set STRIPE_PAYMENT_LINK or STRIPE_SECRET_KEY")
     ThreadingHTTPServer(("0.0.0.0", 8000), H).serve_forever()
