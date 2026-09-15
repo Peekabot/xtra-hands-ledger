@@ -2,12 +2,14 @@
 from urllib.parse import quote_plus
 
 TR = {
+    "bag drop / pickup": "junk removal albany ny",
     "site prep": "yard work albany ny",
     "demo + haul": "junk removal albany ny",
     "surplus pickup": "junk removal albany ny",
     "other": "handyman albany ny",
 }
 FV = {
+    "bag drop / pickup": "product photo editing",
     "site prep": "site plan drawing",
     "demo + haul": "product photo editing",
     "surplus pickup": "marketplace listing photos",
