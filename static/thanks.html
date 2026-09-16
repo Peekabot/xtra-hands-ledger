@@ -6,10 +6,12 @@
   body {{ font: 16px/1.4 system-ui; max-width: 28rem; margin: 1.5rem auto; padding: 0 1rem; }}
   a.btn {{ display: block; margin: .6rem 0; padding: .7rem; border: 1px solid #333; text-align: center; text-decoration: none; color: #000; }}
   .fine {{ color: #555; font-size: .85rem; }}
+  pre {{ background: #f3f3f3; padding: .6rem; overflow-x: auto; font-size: .8rem; }}
 </style>
 <h1>Quote {qid} logged</h1>
 <p>Project {pid}. Pay me direct, or hand off.</p>
 <p class="fine">{work} — {address}</p>
+{bom_block}
 {pay_block}
 <a class="btn" href="/out?qid={qid}&to=taskrabbit">TaskRabbit — lift only</a>
 <a class="btn" href="/out?qid={qid}&to=fiverr">Fiverr — photos / listing</a>
