@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 from fulfill import links as fulfill_links
 from stripe_pay import create_link, static_link
+from takeoff import for_quote
 
 ROOT = Path(__file__).resolve().parent
 PHOTOS = ROOT / "photos"
@@ -92,6 +93,14 @@ def _amount(qid):
     cx.close()
     return (row["amount"] if row else "") or ""
 
+def _num(form, key):
+    v = form.getvalue(key, "") or ""
+    try:
+        x = float(v)
+        return x if x > 0 else None
+    except (TypeError, ValueError):
+        return None
+
 def save_quote(form):
     photo_path = ""
     if "photo" in form:
@@ -128,7 +137,14 @@ def save_quote(form):
     )
     cx.commit()
     cx.close()
-    return qid, pid, fields
+    bom = for_quote(
+        qid,
+        wall_ft=_num(form, "wall_ft"),
+        wall_h=_num(form, "wall_h"),
+        floor_w=_num(form, "floor_w"),
+        floor_span=_num(form, "floor_span"),
+    )
+    return qid, pid, fields, bom
 
 def log_click(qid, dest):
     dest = (dest or "")[:32]
@@ -219,12 +235,13 @@ class H(BaseHTTPRequestHandler):
             "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
         }
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env)
-        qid, pid, fields = save_quote(form)
+        qid, pid, fields, bom = save_quote(form)
         html = THANKS.format(
             qid=qid, pid=pid,
             work=fields.get("work") or "",
             address=fields.get("address") or "",
             pay_block=pay_block(qid),
+            bom_block=bom or "",
         )
         return self._send(200, html, "text/html; charset=utf-8")
 
