@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import io
 import math
 import sqlite3
+import sys
 from pathlib import Path
 
 DB = str(Path(__file__).resolve().parent / "takeoff.db")
@@ -31,7 +33,6 @@ def init(reset=False):
     ])
     c.commit()
     c.close()
-    print("db ready:", DB)
 
 def _add(job, sku, qty, note=""):
     c = _conn()
@@ -45,21 +46,19 @@ def wall(length_ft, height_ft=8, oc_in=16, job="wall"):
     area = length_ft * height_ft
     osb = math.ceil(area * 1.15 / 32)
     dw = math.ceil(area * 2 * 1.15 / 32)
-    _add(job, "2x4-8", studs, f"{length_ft}ft wall studs")
+    _add(job, "2x4-8", studs, "%sft wall studs" % length_ft)
     _add(job, "2x4-8", plates_8, "plates x3 +10%")
     _add(job, "OSB-7/16", osb, "sheathing")
     _add(job, "DW-1/2", dw, "drywall 2 sides")
-    print(f"wall {length_ft}x{height_ft}: {studs} studs, {plates_8} plates, {osb} OSB, {dw} DW")
 
 def floor(width_ft, span_ft=12, oc_in=16, job="floor"):
     n = math.ceil(width_ft * 12 / oc_in) + 1
     sku = "2x10-12" if span_ft >= 12 else "2x6-12"
     sheets = math.ceil(width_ft * span_ft * 1.15 / 32)
-    _add(job, sku, n, f"{span_ft}ft span {oc_in}oc")
+    _add(job, sku, n, "%sft span %soc" % (span_ft, oc_in))
     _add(job, "OSB-7/16", sheets, "subfloor")
-    print(f"floor {width_ft}x{span_ft}: {n} {sku}, {sheets} OSB")
 
-def bom(job=None):
+def bom_text(job=None):
     c = _conn()
     q = """SELECT l.job, l.sku, SUM(l.qty), c.unit_cost, SUM(l.qty)*c.unit_cost, GROUP_CONCAT(l.note,' | ')
            FROM line l JOIN catalog c ON c.sku=l.sku"""
@@ -69,13 +68,31 @@ def bom(job=None):
         args = (job,)
     q += " GROUP BY l.job, l.sku"
     rows = c.execute(q, args).fetchall()
-    total = 0
-    print(f"{'job':8} {'sku':10} {'qty':>6} {'$ea':>7} {'ext':>8}")
-    for job, sku, qty, cost, ext, note in rows:
-        total += ext
-        print(f"{job:8} {sku:10} {qty:6.0f} {cost:7.2f} {ext:8.2f}  {note}")
-    print(f"{'':8} {'':10} {'':6} {'TOTAL':>7} {total:8.2f}")
     c.close()
+    if not rows:
+        return ""
+    lines = ["%s %s  qty %.0f  $%.2f" % (r[0], r[1], r[2], r[4]) for r in rows]
+    total = sum(r[4] for r in rows)
+    lines.append("TOTAL $%.2f  (catalog stand-in prices)" % total)
+    return "\n".join(lines)
+
+def bom(job=None):
+    print(bom_text(job) or "(no lines)")
+
+def for_quote(qid, wall_ft=None, wall_h=None, floor_w=None, floor_span=None):
+    init()
+    job = "q%s" % qid
+    ran = False
+    if wall_ft:
+        wall(float(wall_ft), float(wall_h or 8), job=job)
+        ran = True
+    if floor_w:
+        floor(float(floor_w), float(floor_span or 12), job=job)
+        ran = True
+    if not ran:
+        return ""
+    text = bom_text(job)
+    return "<pre>%s</pre>" % text.replace("<", "") if text else ""
 
 def clear():
     c = _conn()
